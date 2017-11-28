@@ -15,6 +15,7 @@ import qualified Data.Maybe as Maybe
 -- While solving the puzzle, we represent the board as a matrix where each cell
 -- contains all possible values for that cell. We define some terminology:
 --   COUNTY - one cell in the matrix
+--   KINGDOM - the NxN matrix of counties
 --   LANE - a horizontal or vertical list of counties
 {-
           NORTH
@@ -35,14 +36,17 @@ T   1 |  |  |  |  |  T
 type Rating = Integer
 -- A county is a set of possible ratings
 type County = Set.Set Rating
-init_county = Set.fromList [1..4]
 -- A position is an (x,y) coordinate pair denoting the location of a county
 -- within the kingdom grid
 type Pos = (Integer, Integer)
 -- A lane is a horizontal or vertical line of counties
 type Lane = [County]
--- A kingdom is a mapping from positions to counties. This describes the board
-type Kingdom = Map.Map Pos County
+-- A kingdom is a mapping from positions to counties. This describes the state
+-- of the board at a given time during the solve process.
+data Kingdom = Kingdom {
+    size :: Integer,
+    counties :: Map.Map Pos County
+}
 
 -- Enumerates the set of possible board sides
 data Side = North | East | South | West deriving (Eq, Ord, Show)
@@ -71,57 +75,93 @@ data Puzzle = Puzzle {
     clues :: Clues
 }
 
+-- A heuristic function takes a puzzle and a clue position, performs some
+-- heuristic constraint checking, and either returns a puzzle with additional
+-- constraints imposed (closer to being solved) or Nothing if a contradiction
+-- was found.
+type HeuristicFn = Puzzle -> CluePos -> Maybe Puzzle
+
 ---------------------------------------
 -- HELPER FUNCTIONS
 ---------------------------------------
+-- Determines the size of the kingdom from the clues input
+get_size_from_clues :: Input -> Integer
+get_size_from_clues (n, _, _, _) = toInteger (length n)
+
+-- Gets the size of the kingdom from a puzzle instance
+get_size :: Puzzle -> Integer
+get_size p = size (kingdom p)
+
 -- Returns the county at the given position
 get_county :: Kingdom -> Pos -> County
-get_county k (x, y) = Maybe.fromJust (Map.lookup (x, y) k)
+get_county k (x, y) = Maybe.fromJust (Map.lookup (x, y) m)
+    where m = counties k
 
--- Constructs a lane for the given side at the given index.
-get_lane :: Kingdom -> Side -> Integer -> Lane
-get_lane k side i
-    | side == North =
-        map (\ j -> get_county k (i, j)) (reverse [1..4])
-    | side == East =
-        map (\ j -> get_county k (j, i)) (reverse [1..4])
-    | side == South =
-        map (\ j -> get_county k (i, j)) [1..4]
-    | side == West =
-        map (\ j -> get_county k (j, i)) [1..4]
+-- Gets the clue at the given position
+get_clue :: Puzzle -> CluePos -> Clue
+get_clue puzzle pos = Maybe.fromJust (Map.lookup pos (clues puzzle))
+
+-- Constructs a lane for the given clue position (side, index)
+get_lane :: Puzzle -> CluePos -> Lane
+get_lane puzzle cp
+    | sd == North =
+        map (\ j -> get_county k (i, j)) (reverse [1..n])
+    | sd == East =
+        map (\ j -> get_county k (j, i)) (reverse [1..n])
+    | sd == South =
+        map (\ j -> get_county k (i, j)) [1..n]
+    | sd == West =
+        map (\ j -> get_county k (j, i)) [1..n]
+    where
+        k = kingdom puzzle
+        n = size k
+        sd = side cp
+        i = index cp
+
+-- Removes a possible rating from a county
+rm_rating :: County -> Rating -> County
+rm_rating county rating = Set.delete rating county
+
+-- Asserts the only possible rating for a county
+set_rating :: County -> Rating -> County
+set_rating county rating = Set.fromList [rating]
 
 ---------------------------------------
 -- INITIALIZATION
 ---------------------------------------
 -- Creates a puzzle instance to work with from an input
 init_puzzle :: Input -> Puzzle
-init_puzzle clues = Puzzle init_kingdom (init_clues clues)
+init_puzzle clues = Puzzle
+    (init_kingdom (get_size_from_clues clues))
+    (init_clues clues)
 
--- Initializes a kingdom
-init_kingdom :: Kingdom
-init_kingdom = 
-    foldr (\ pos mp -> Map.insert pos init_county mp) Map.empty
-        [(x, y) | x <- [1..4], y <- [1..4]]
+init_county n = Set.fromList [1..n]
+
+-- Initializes a kingdom with a given size
+init_kingdom :: Integer -> Kingdom
+init_kingdom n = Kingdom n
+    (foldr (\ pos mp -> Map.insert pos (init_county n) mp) Map.empty
+        [(x, y) | x <- [1..n], y <- [1..n]])
 
 --Initializes all the clues
 init_clues :: Input -> Clues
 init_clues (n, e, s, w) =
     foldr Map.union Map.empty
-        (map (\ (lst, side) -> init_clue_side lst side) (zip [n, e, s, w] sides))
+        (map (\ (lst, sd) -> init_clue_side lst sd) (zip [n, e, s, w] sides))
 
 -- Initializes the clues from one side of the kingdom. Because of the way
 -- the input is formatted, N/W are in the correct order, E/S are not.
 init_clue_side :: [Integer] -> Side -> Clues
-init_clue_side lst side
-    | side == North || side == West =
-        _init_clue_side lst side
-    | side == East || side == South =
-        _init_clue_side (reverse lst) side
+init_clue_side lst sd
+    | sd == North || sd == West =
+        _init_clue_side lst sd
+    | sd == East || sd == South =
+        _init_clue_side (reverse lst) sd
 
 -- Helper function for init_clue_side formats a list, assuming the list is
 -- ordered as we need it given the side.
 _init_clue_side :: [Integer] -> Side -> Clues
-_init_clue_side lst side = Map.fromList [((CluePos side i), clue) | (i, clue) <- zip [0..] lst]
+_init_clue_side lst sd = Map.fromList [((CluePos sd i), clue) | (i, clue) <- zip [0..] lst]
 
 ---------------------------------------
 -- SOLVER
@@ -133,3 +173,18 @@ type Output = [[Integer]]
 zed :: Input -> Output
 -- Placeholder to prevent errors
 zed x = [[]]
+
+---------------------------------------
+-- CONSTRAINT HEURISTICS
+---------------------------------------
+-- If a clue is equal to the size of the kingdom, we know exactly how the
+-- corresponding lane must look. If we encounter a contradiction, return
+-- Nothing.
+ordered_ch :: HeuristicFn
+ordered_ch puzzle cp
+    | clue == n = Just puzzle
+    | otherwise = Just puzzle
+    where
+        lane = get_lane puzzle cp
+        clue = get_clue puzzle cp
+        n = get_size puzzle
