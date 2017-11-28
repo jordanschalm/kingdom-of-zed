@@ -9,6 +9,7 @@ Seerat Sekhon
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Data.Maybe as Maybe
 
 -- Internal puzzle representation:
 -- While solving the puzzle, we represent the board as a matrix where each cell
@@ -38,6 +39,8 @@ init_county = Set.fromList [1..4]
 -- A position is an (x,y) coordinate pair denoting the location of a county
 -- within the kingdom grid
 type Pos = (Integer, Integer)
+-- A lane is a horizontal or vertical line of counties
+type Lane = [County]
 -- A kingdom is a mapping from positions to counties. This describes the board
 type Kingdom = Map.Map Pos County
 
@@ -68,16 +71,24 @@ data Puzzle = Puzzle {
     clues :: Clues
 }
 
--- Helper functions
-enumerate lst = zip [0..] lst
+---------------------------------------
+-- HELPER FUNCTIONS
+---------------------------------------
+-- Returns the county at the given position
+get_county :: Kingdom -> Pos -> County
+get_county k (x, y) = Maybe.fromJust (Map.lookup (x, y) k)
 
--- Define the input/outputs to the solver.
--- Clues in order (N, E, S, W)
-type Input = ([Integer], [Integer], [Integer], [Integer])
-type Output = [[Integer]]
-zed :: Input -> Output
--- Placeholder to prevent errors
-zed x = [[]]
+-- Constructs a lane for the given side at the given index.
+get_lane :: Kingdom -> Side -> Integer -> Lane
+get_lane k side i
+    | side == North =
+        map (\ j -> get_county k (i, j)) (reverse [1..4])
+    | side == East =
+        map (\ j -> get_county k (j, i)) (reverse [1..4])
+    | side == South =
+        map (\ j -> get_county k (i, j)) [1..4]
+    | side == West =
+        map (\ j -> get_county k (j, i)) [1..4]
 
 ---------------------------------------
 -- INITIALIZATION
@@ -110,4 +121,15 @@ init_clue_side lst side
 -- Helper function for init_clue_side formats a list, assuming the list is
 -- ordered as we need it given the side.
 _init_clue_side :: [Integer] -> Side -> Clues
-_init_clue_side lst side = Map.fromList [((CluePos side i), clue) | (i, clue) <- enumerate lst]
+_init_clue_side lst side = Map.fromList [((CluePos side i), clue) | (i, clue) <- zip [0..] lst]
+
+---------------------------------------
+-- SOLVER
+---------------------------------------
+-- Define the input/outputs to the solver.
+-- Clues in order (N, E, S, W)
+type Input = ([Integer], [Integer], [Integer], [Integer])
+type Output = [[Integer]]
+zed :: Input -> Output
+-- Placeholder to prevent errors
+zed x = [[]]
