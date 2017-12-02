@@ -3,14 +3,13 @@ CPSC 312 Project 2
 Kingdom of Zed
 
 Jordan Schalm   37955135
-David Julien
-Seerat Sekhon
+David Julien    16997132
+Seerat Sekhon   35145135
 -}
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Data.Maybe as Maybe
-import Debug.Trace
 
 -- Internal puzzle representation:
 -- While solving the puzzle, we represent the board as a matrix where each cell
