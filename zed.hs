@@ -109,11 +109,25 @@ k_is_solved k = all
     (\ pos -> k_county_solved k pos)
     (all_coords (size k))
 
+-- Returns a string representation of the kingdom
+instance Show Kingdom where show k = k_str k
+
+k_str :: Kingdom -> String
+k_str k = foldr (\ row str -> (k_row_str row) ++ "\n" ++ str) "" (k_get_rows k)
+
+k_row_str :: Lane -> String
+k_row_str lane = foldr (\ county str -> (k_county_str county) ++ "\t" ++ str) "" lane
+
+k_county_str :: County -> String
+k_county_str county = foldr (\ val str -> (show val) ++ str) "" (Set.toList county)
+
+-- Formats a kingdom for output
 k_format :: Maybe Kingdom -> [[Integer]]
 k_format k
     | k == Nothing = [[]]
     | otherwise = [[Set.elemAt 0 c | c <- row] | row <- k_get_rows (Maybe.fromJust k)]
 
+-- Returns a list of lanes that correspond to the in-order rows of the kingdom map.
 k_get_rows k = [k_get_lane k pos | pos <- [(West, i) | i <- reverse [1..n]]]
     where n = size k
 
@@ -131,9 +145,9 @@ solve k
         | k_is_solved (Maybe.fromJust k_next) = k_next
         | maybe_unsolved_pos == Nothing = Nothing
         | maybe_unsolved_opts == Nothing = Nothing
-        | otherwise = some
-            [_solve_unwrap k_next maybe_unsolved_pos (Set.fromList [val]) |
-            val <- Set.toList (Maybe.fromJust maybe_unsolved_opts)]
+        | otherwise =  some
+            [_solve_unwrap k_next maybe_unsolved_pos (Set.singleton guess) |
+            guess <- Set.toList (Maybe.fromJust maybe_unsolved_opts)]
     where 
         k_next = apply_rules k
         maybe_unsolved_pos = _get_unsolved k_next
@@ -152,10 +166,10 @@ _get_unsolved_opts k pos
 
 -- Calls solve, but unwraps a bunch of stuff
 _solve_unwrap :: Maybe Kingdom -> Maybe Pos -> County -> Maybe Kingdom
-_solve_unwrap k pos val
+_solve_unwrap k pos county
     | k == Nothing = Nothing
     | pos == Nothing = Nothing
-    | otherwise = solve (Just (k_set (Maybe.fromJust k) (Maybe.fromJust pos) val))
+    | otherwise = solve (Just (k_set (Maybe.fromJust k) (Maybe.fromJust pos) county))
 
 ---------------------------------------
 -- HELPERS
@@ -363,11 +377,10 @@ get_singles lane = filter (\ v -> (count v flat_lane) == 1) [1..n]
 -- If the county contains a single, set the county to that rating
 -- We assume the county contains only one single.
 set_singles county singles
-        | contains_single = single
+        | (len single) > 0 = Set.fromList single
         | otherwise = county
     where
-        single = Set.union county (Set.fromList singles)
-        contains_single = (len single) > 0
+        single = filter (\ s -> Set.member s county) singles
 
 -- If a lane is complete, it must satisfy its clue.
 r_complete_valid :: Rule
@@ -380,25 +393,25 @@ r_complete_valid k pos
         is_complete = all (\ c -> (len c) == 1) lane
 
 -- List of all rule functions
-rules = [r_no_empty, r_no_missing, r_unique, r_one_rating, r_complete_valid]
+rules = [r_complete_valid, r_no_empty, r_no_missing, r_unique, r_one_rating]
 
 -- Applies all rules for a given kingodm state. If a contradiction is reached,
 -- return Nothing, otherwise return the reduced kingdom.
 apply_rules :: Maybe Kingdom -> Maybe Kingdom
 apply_rules k
     | k == Nothing = Nothing
+    | otherwise = foldr (\ rule _k -> apply_one_rule _k rule) k rules
+
+-- Applies one rule for all clue positions.
+apply_one_rule :: Maybe Kingdom -> Rule -> Maybe Kingdom
+apply_one_rule k rule
+    | k == Nothing = Nothing
     | otherwise = foldr
-        (\ pos _k -> _apply_rules _k pos)
+        (\ pos _k -> apply_rule_helper _k pos rule)
         k
         (all_clue_coords (size (Maybe.fromJust k)))
 
-_apply_rules :: Maybe Kingdom -> CluePos -> Maybe Kingdom
-_apply_rules k pos
-    | k == Nothing = Nothing
-    | otherwise = _apply_rules_helper k pos rules
-
-_apply_rules_helper :: Maybe Kingdom -> CluePos -> [Rule] -> Maybe Kingdom
-_apply_rules_helper k _ [] = k
-_apply_rules_helper k pos (rule:rest)
-    | k == Nothing = Nothing
-    | otherwise = _apply_rules_helper (rule (Maybe.fromJust k) pos) pos rest
+apply_rule_helper :: Maybe Kingdom -> CluePos -> Rule -> Maybe Kingdom
+apply_rule_helper k pos rule
+    | k == Nothing =  Nothing
+    | otherwise = rule (Maybe.fromJust k) pos
